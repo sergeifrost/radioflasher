@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Yo Radio Flasher</title>
+    <script src="https://unpkg.com/esp-web-flasher@8.0.2/dist/webflasher.js"></script>
+  </head>
+  <body>
+    <h1>Yo Radio Web Flasher</h1>
+    <p>Подключи ESP к USB, нажми кнопку ниже и выбери COM-порт.</p>
+
+    <button id="flash">Прошить Yo Radio</button>
+
+    <script>
+      // Твои прошивки и адреса
+      const firmware = [
+        { offset: "0x0", url: "bootloader.bin" },
+        { offset: "0x8000", url: "partitions.bin" },
+        { offset: "0x10000", url: "firmware.bin" },
+        { offset: "0x3D0000", url: "spiffs.bin" }
+      ];
+
+      document.getElementById("flash").addEventListener("click", async () => {
+        try {
+          const flasher = new ESPLoaderWeb();
+          await flasher.connect();
+          await flasher.flash(firmware);
+          alert("✅ Готово! Yo Radio прошит.");
+        } catch (e) {
+          alert("⚠️ Ошибка: " + e);
+        }
+      });
+    </script>
+  </body>
+</html>
