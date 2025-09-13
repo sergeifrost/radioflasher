@@ -93,7 +93,9 @@
         logEl.textContent = "";
         setProgress(0);
         log("🔌 Ожидание выбора порта...");
-        const esptool = new ESPLoader();
+        
+        // ИСПРАВЛЕНИЕ: Используем правильное название класса
+        const esptool = new EspTool();
         await esptool.initialize();
         log("✅ Соединение установлено.");
 
