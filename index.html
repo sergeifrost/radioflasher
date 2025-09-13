@@ -66,8 +66,9 @@
 
   <pre id="log"></pre>
 
-  <!-- Подключаем esptool-js -->
-  <script src="https://unpkg.com/esptool-js/bundle.js"></script>
+  <!-- ИСПРАВЛЕННАЯ ссылка на библиотеку -->
+  <script src="https://cdn.jsdelivr.net/npm/esptool-js@0.1.4/dist/esptool-js.js"></script>
+  
   <script>
     const files = [
       { offset: 0x0,       name: "bootloader.bin" },
@@ -94,7 +95,11 @@
         setProgress(0);
         log("🔌 Ожидание выбора порта...");
         
-        // ИСПРАВЛЕНИЕ: Используем правильное название класса
+        // Проверяем, загрузилась ли библиотека
+        if (typeof EspTool === 'undefined') {
+          throw new Error('Библиотека esptool-js не загрузилась. Проверьте подключение к интернету.');
+        }
+        
         const esptool = new EspTool();
         await esptool.initialize();
         log("✅ Соединение установлено.");
