@@ -1,35 +1,47 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Yo Radio Flasher</title>
-    <script src="https://unpkg.com/esp-web-flasher@8.0.2/dist/webflasher.js"></script>
-  </head>
-  <body>
-    <h1>Yo Radio Web Flasher</h1>
-    <p>Подключи ESP к USB, нажми кнопку ниже и выбери COM-порт.</p>
+<head>
+  <meta charset="utf-8">
+  <title>Yo Radio Web Flasher</title>
+</head>
+<body>
+  <h1>Yo Radio Web Flasher</h1>
+  <p>Подключи ESP к USB, нажми кнопку ниже и выбери COM-порт.</p>
+  <button id="flash">Прошить Yo Radio</button>
 
-    <button id="flash">Прошить Yo Radio</button>
+  <script type="module">
+    import { ESPLoader } from "https://unpkg.com/esp-web-flasher@8.0.1/dist/web/esp-web-flasher.js";
 
-    <script>
-      // Твои прошивки и адреса
-      const firmware = [
-        { offset: "0x0", url: "bootloader.bin" },
-        { offset: "0x8000", url: "partitions.bin" },
-        { offset: "0x10000", url: "firmware.bin" },
-        { offset: "0x3D0000", url: "spiffs.bin" }
-      ];
+    const button = document.getElementById("flash");
 
-      document.getElementById("flash").addEventListener("click", async () => {
-        try {
-          const flasher = new ESPLoaderWeb();
-          await flasher.connect();
-          await flasher.flash(firmware);
-          alert("✅ Готово! Yo Radio прошит.");
-        } catch (e) {
-          alert("⚠️ Ошибка: " + e);
+    button.addEventListener("click", async () => {
+      try {
+        const port = await navigator.serial.requestPort();   // тут появится окно выбора порта
+        await port.open({ baudRate: 115200 });
+
+        const loader = new ESPLoader(port, { baudrate: 115200 });
+        await loader.initialize();
+
+        // прошивки (с твоими адресами!)
+        const files = [
+          { offset: 0x0,       url: "bootloader.bin" },
+          { offset: 0x8000,    url: "partitions.bin" },
+          { offset: 0x10000,   url: "firmware.bin" },
+          { offset: 0x3d0000,  url: "spiffs.bin" },
+        ];
+
+        for (const f of files) {
+          const resp = await fetch(f.url);
+          const data = new Uint8Array(await resp.arrayBuffer());
+          await loader.flashData(data, f.offset);
         }
-      });
-    </script>
-  </body>
+
+        alert("✅ Готово! ESP прошита.");
+      } catch (e) {
+        alert("Ошибка: " + e);
+        console.error(e);
+      }
+    });
+  </script>
+</body>
 </html>
