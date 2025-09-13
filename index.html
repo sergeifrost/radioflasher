@@ -1,44 +1,125 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <title>Yo Radio Web Flasher</title>
+  <meta charset="UTF-8">
+  <title>YoRadio Web Flasher</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      text-align: center;
+      padding: 40px;
+    }
+    h1 {
+      color: #0077cc;
+    }
+    button {
+      background: #0077cc;
+      color: #fff;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      margin: 20px 0;
+    }
+    button:hover {
+      background: #005fa3;
+    }
+    #progress-container {
+      width: 80%;
+      margin: 20px auto;
+      background: #ddd;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    #progress-bar {
+      height: 24px;
+      width: 0%;
+      background: #4caf50;
+      transition: width 0.3s;
+    }
+    #log {
+      text-align: left;
+      margin: 20px auto;
+      width: 80%;
+      padding: 10px;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      height: 200px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 13px;
+    }
+  </style>
 </head>
 <body>
-  <h1>Yo Radio Web Flasher</h1>
-  <p>Подключи ESP к USB, нажми кнопку ниже и выбери COM-порт.</p>
-  <button id="flash">Прошить Yo Radio</button>
+  <h1>YoRadio Web Flasher</h1>
+  <p>Подключите ESP32/ESP8266 и нажмите кнопку ниже:</p>
+  <button id="flash">Выбрать порт и прошить</button>
 
-  <script type="module">
-    import { ESPLoader } from "https://unpkg.com/esp-web-flasher@8.0.1/dist/web/esp-web-flasher.js";
+  <div id="progress-container">
+    <div id="progress-bar"></div>
+  </div>
 
-    const button = document.getElementById("flash");
+  <pre id="log"></pre>
 
-    button.addEventListener("click", async () => {
+  <!-- Подключаем esptool-js -->
+  <script src="https://unpkg.com/esptool-js/bundle.js"></script>
+  <script>
+    const files = [
+      { offset: 0x0,       name: "bootloader.bin" },
+      { offset: 0x8000,    name: "partitions.bin" },
+      { offset: 0x10000,   name: "firmware.bin" },
+      { offset: 0x3D0000,  name: "spiffs.bin" }
+    ];
+
+    const logEl = document.getElementById("log");
+    const progressBar = document.getElementById("progress-bar");
+
+    function log(msg) {
+      logEl.textContent += msg + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setProgress(percent) {
+      progressBar.style.width = percent + "%";
+    }
+
+    document.getElementById("flash").addEventListener("click", async () => {
       try {
-        const port = await navigator.serial.requestPort();   // тут появится окно выбора порта
-        await port.open({ baudRate: 115200 });
+        logEl.textContent = "";
+        setProgress(0);
+        log("🔌 Ожидание выбора порта...");
+        const esptool = new ESPLoader();
+        await esptool.initialize();
+        log("✅ Соединение установлено.");
 
-        const loader = new ESPLoader(port, { baudrate: 115200 });
-        await loader.initialize();
-
-        // прошивки (с твоими адресами!)
-        const files = [
-          { offset: 0x0,       url: "bootloader.bin" },
-          { offset: 0x8000,    url: "partitions.bin" },
-          { offset: 0x10000,   url: "firmware.bin" },
-          { offset: 0x3d0000,  url: "spiffs.bin" },
-        ];
-
-        for (const f of files) {
-          const resp = await fetch(f.url);
+        const fileData = {};
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
+          log(`📥 Загрузка ${f.name}...`);
+          const resp = await fetch(f.name);
           const data = new Uint8Array(await resp.arrayBuffer());
-          await loader.flashData(data, f.offset);
+          fileData[f.offset] = data;
         }
 
-        alert("✅ Готово! ESP прошита.");
+        log("🚀 Начало прошивки...");
+        await esptool.writeFlash({
+          fileArray: fileData,
+          flashSize: "keep",
+          onProgress: (bytesWritten, totalBytes) => {
+            const percent = Math.floor((bytesWritten / totalBytes) * 100);
+            setProgress(percent);
+          }
+        });
+
+        setProgress(100);
+        log("🎉 Прошивка завершена!");
       } catch (e) {
-        alert("Ошибка: " + e);
+        log("❌ Ошибка: " + e.message);
         console.error(e);
       }
     });
