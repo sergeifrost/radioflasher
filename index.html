@@ -65,7 +65,7 @@
 </head>
 <body>
   <h1>YoRadio Web Flasher</h1>
-  <p>Подключите ESP32/ESP8266 и выполните действия по порядку:</p>
+  <p>Подключите ESP32/ESP8266 и выполните шаги:</p>
   
   <div>
     <button id="selectPort">1. Выбрать порт</button>
@@ -73,7 +73,7 @@
     <button id="flash" disabled>3. Прошить</button>
   </div>
 
-  <div class="status" id="status">Статус: Выберите порт</div>
+  <div class="status" id="status">Статус: ожидает действия</div>
 
   <div id="progress-container">
     <div id="progress-bar"></div>
@@ -81,8 +81,8 @@
 
   <pre id="log"></pre>
 
-  <!-- Подключаем esptool-js -->
-  <script src="https://cdn.jsdelivr.net/npm/esptool-js@0.1.4/dist/esptool-js.js"></script>
+  <!-- правильное подключение библиотеки -->
+  <script src="https://unpkg.com/esptool-js/bundle.js"></script>
   
   <script>
     const files = [
@@ -100,7 +100,7 @@
     const flashBtn = document.getElementById("flash");
 
     let selectedPort = null;
-    let esptool = null;
+    let esploader = null;
 
     function log(msg) {
       logEl.textContent += msg + "\n";
@@ -117,94 +117,68 @@
 
     function updateButtons() {
       connectBtn.disabled = !selectedPort;
-      flashBtn.disabled = !esptool;
+      flashBtn.disabled = !esploader;
     }
 
     // 1. Выбор порта
     selectPortBtn.addEventListener("click", async () => {
       try {
-        log("🔌 Выбор последовательного порта...");
-        
         if (!navigator.serial) {
           throw new Error("Web Serial API не поддерживается. Используйте Chrome или Edge.");
         }
-
         selectedPort = await navigator.serial.requestPort();
-        log("✅ Порт выбран: " + (selectedPort.getInfo().usbProductId || "Unknown"));
+        log("✅ Порт выбран");
         setStatus("Порт выбран");
         updateButtons();
-        
       } catch (e) {
-        if (e.name === 'NotFoundError') {
-          log("❌ Порт не выбран");
-        } else {
-          log("❌ Ошибка выбора порта: " + e.message);
-        }
-        console.error(e);
+        log("❌ Ошибка выбора порта: " + e.message);
       }
     });
 
-    // 2. Подключение к устройству
+    // 2. Подключение
     connectBtn.addEventListener("click", async () => {
       try {
-        log("🔗 Подключение к устройству...");
-        setStatus("Подключение");
-        
-        if (!selectedPort) {
-          throw new Error("Сначала выберите порт");
-        }
-
-        esptool = new EspTool();
-        await esptool.initialize(selectedPort);
-        
-        log("✅ Успешно подключено к ESP");
+        setStatus("Подключение...");
+        log("🔗 Подключение к ESP...");
+        esploader = new esptool.EspLoader({ debug: true });
+        await esploader.connect(selectedPort);
+        log("✅ Устройство подключено");
         setStatus("Подключено");
         updateButtons();
-        
       } catch (e) {
         log("❌ Ошибка подключения: " + e.message);
         setStatus("Ошибка подключения");
-        console.error(e);
-        esptool = null;
-        updateButtons();
       }
     });
 
     // 3. Прошивка
     flashBtn.addEventListener("click", async () => {
       try {
-        logEl.textContent = "";
-        setProgress(0);
         log("🚀 Начало прошивки...");
         setStatus("Прошивка");
+        setProgress(0);
 
-        if (!esptool) {
-          throw new Error("Сначала подключитесь к устройству");
-        }
-
-        // Загрузка файлов прошивки
         const fileData = {};
-        for (let i = 0; i < files.length; i++) {
-          const f = files[i];
+        let totalSize = 0;
+
+        // Загружаем все BIN-файлы
+        for (let f of files) {
           log(`📥 Загрузка ${f.name}...`);
-          try {
-            const resp = await fetch(f.name);
-            if (!resp.ok) throw new Error(`Файл не найден: ${resp.status}`);
-            const data = new Uint8Array(await resp.arrayBuffer());
-            fileData[f.offset] = data;
-            log(`✅ ${f.name} загружен`);
-          } catch (e) {
-            log(`❌ Ошибка загрузки ${f.name}: ${e.message}`);
-            throw e;
-          }
+          const resp = await fetch(f.name);
+          if (!resp.ok) throw new Error(`Не найден ${f.name}`);
+          const data = new Uint8Array(await resp.arrayBuffer());
+          fileData[f.offset] = data;
+          totalSize += data.length;
+          log(`✅ ${f.name} загружен`);
         }
 
-        // Процесс прошивки
-        await esptool.writeFlash({
+        let written = 0;
+        await esploader.writeFlash({
           fileArray: fileData,
           flashSize: "keep",
           onProgress: (bytesWritten, totalBytes) => {
-            const percent = Math.floor((bytesWritten / totalBytes) * 100);
+            written = bytesWritten;
+            const percent = Math.floor((written / totalBytes) * 100);
             setProgress(percent);
             log(`Прогресс: ${percent}%`);
           }
@@ -213,21 +187,9 @@
         setProgress(100);
         log("🎉 Прошивка завершена успешно!");
         setStatus("Готово");
-        
       } catch (e) {
         log("❌ Ошибка прошивки: " + e.message);
         setStatus("Ошибка прошивки");
-        console.error(e);
-      }
-    });
-
-    // Проверка поддержки Web Serial API при загрузке
-    window.addEventListener('load', () => {
-      if (!navigator.serial) {
-        log("⚠️ Web Serial API не поддерживается вашим браузером");
-        log("ℹ️ Используйте Chrome, Edge или другой совместимый браузер");
-        selectPortBtn.disabled = true;
-        setStatus("Браузер не поддерживается");
       }
     });
   </script>
