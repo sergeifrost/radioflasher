@@ -1,241 +1,69 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="utf-8" />
-<title>YoRadio Web Flasher</title>
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<style>
-  body{font-family:Arial,Helvetica,sans-serif;background:#f5f5f5;color:#222;padding:30px;text-align:center;}
-  h1{color:#0b78c6}
-  .buttons{margin:20px 0}
-  button{background:#0b78c6;color:#fff;border:none;padding:12px 20px;border-radius:8px;font-size:16px;margin:6px;cursor:pointer}
-  button:disabled{background:#ccc;color:#666;cursor:not-allowed}
-  #status{font-weight:bold;margin:12px}
-  #progress-wrap{width:80%;max-width:900px;margin:12px auto;background:#e0e0e0;border-radius:8px;height:18px;overflow:hidden}
-  #progress{height:100%;width:0%;background:#4caf50;transition:width .2s}
-  pre#log{width:80%;max-width:900px;margin:12px auto;padding:12px;background:#fff;border:1px solid #ddd;border-radius:8px;text-align:left;height:260px;overflow:auto;font-family:monospace}
-</style>
+  <meta charset="UTF-8">
+  <title>YoRadio Web Flasher</title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; padding: 40px; }
+    h1 { color: #0077cc; }
+    button { padding: 10px 20px; margin: 10px; font-size: 16px; }
+    #log { text-align: left; margin: 20px auto; width: 80%; height: 200px; overflow-y: auto;
+           background: #f5f5f5; border: 1px solid #ccc; padding: 10px; font-family: monospace; }
+  </style>
 </head>
 <body>
   <h1>YoRadio Web Flasher</h1>
-  <p>Подключите ESP и выполните шаги: выберите порт → подключитесь → прошейте</p>
+  <p>Подключите ESP32/ESP8266 и выполните шаги:</p>
 
-  <div class="buttons">
-    <button id="btnSelect">1. Выбрать порт</button>
-    <button id="btnConnect" disabled>2. Подключиться</button>
-    <button id="btnFlash" disabled>3. Прошить</button>
-  </div>
+  <button id="selectPort">1. Выбрать порт</button>
+  <button id="flash" disabled>2. Прошить</button>
 
-  <div id="status">Статус: ожидание</div>
+  <pre id="log"></pre>
 
-  <div id="progress-wrap"><div id="progress"></div></div>
+  <!-- Загружаем esptool-js как ES Module -->
+  <script type="module">
+    import { ESPLoader } from "https://cdn.jsdelivr.net/npm/esptool-js@0.5.0/bundle.min.js";
 
-  <pre id="log">Лог:\n</pre>
+    const logEl = document.getElementById("log");
+    const selectPortBtn = document.getElementById("selectPort");
+    const flashBtn = document.getElementById("flash");
 
-<script>
-/* ====== Параметры прошивки (имена файлов и адреса) ======
-   Убедитесь, что эти файлы загружены в тот же каталог, что и index.html */
-const FILES = [
-  { name: 'bootloader.bin', address: 0x0 },
-  { name: 'partitions.bin', address: 0x8000 },
-  { name: 'firmware.bin', address: 0x10000 },
-  { name: 'spiffs.bin', address: 0x3d0000 }
-];
+    let transport, loader;
 
-const logEl = document.getElementById('log');
-const statusEl = document.getElementById('status');
-const progressEl = document.getElementById('progress');
-const btnSelect = document.getElementById('btnSelect');
-const btnConnect = document.getElementById('btnConnect');
-const btnFlash = document.getElementById('btnFlash');
-
-let selectedPort = null;
-let transport = null;
-let loader = null;
-
-function log(msg){
-  const t = new Date().toLocaleTimeString();
-  logEl.textContent += `[${t}] ${msg}\n`;
-  logEl.scrollTop = logEl.scrollHeight;
-  console.log(msg);
-}
-function setStatus(s){ statusEl.textContent = 'Статус: ' + s; }
-function setProgress(p){ progressEl.style.width = (Math.max(0, Math.min(100,p))) + '%'; }
-
-async function loadScript(url){
-  return new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = url;
-    s.onload = () => res(url);
-    s.onerror = () => rej(new Error('Ошибка загрузки ' + url));
-    document.head.appendChild(s);
-  });
-}
-
-async function ensureEsptoolJS(){
-  // Попытаемся загрузить стандартный bundle, затем запасной путь
-  if (window.ESPLoader && window.Transport) {
-    log('esptool-js уже загружен в окно.');
-    return;
-  }
-  try {
-    log('Загружаю esptool-js (bundle.js)...');
-    await loadScript('https://unpkg.com/esptool-js/bundle.js');
-  } catch(e){
-    log('bundle.js не загрузился, пробую lib/index.js...');
-    try {
-      await loadScript('https://unpkg.com/esptool-js/lib/index.js');
-    } catch(e2){
-      log('❌ Не удалось загрузить esptool-js с CDN: ' + e2.message);
-      throw e2;
-    }
-  }
-  // ещё раз проверим
-  if (!(window.ESPLoader || (window.esptool && window.esptool.ESPLoader))){
-    throw new Error('esptool-js загружен, но ESPLoader недоступен (неправильный экспорт). Откройте консоль сети, посмотрите, что загрузилось.');
-  }
-  log('✅ esptool-js доступен.');
-}
-
-/* ---- 1. Выбрать порт ---- */
-btnSelect.addEventListener('click', async () => {
-  try {
-    if (!navigator.serial) {
-      setStatus('Web Serial API не поддерживается в этом браузере');
-      log('⚠️ Ваш браузер не поддерживает Web Serial API. Откройте Chrome/Edge.');
-      return;
-    }
-    log('Открываю диалог выбора порта...');
-    selectedPort = await navigator.serial.requestPort();
-    const info = selectedPort.getInfo ? selectedPort.getInfo() : {};
-    log('Порт выбран: ' + (info.usbVendorId ? ('VID:0x' + info.usbVendorId.toString(16)) : 'unknown'));
-    setStatus('Порт выбран');
-    btnConnect.disabled = false;
-  } catch (e) {
-    log('Порт не выбран: ' + (e && e.message ? e.message : e));
-  }
-});
-
-/* ---- 2. Подключиться ---- */
-btnConnect.addEventListener('click', async () => {
-  try {
-    setStatus('Подключение: загружаю библиотеку...');
-    await ensureEsptoolJS();
-
-    if (!selectedPort) throw new Error('Сначала выберите порт.');
-
-    log('Создаём Transport и открываем порт...');
-    const TransportClass = window.Transport || (window.esptool && window.esptool.Transport);
-    if (!TransportClass) throw new Error('Transport класс не найден в esptool-js.');
-
-    transport = new TransportClass(selectedPort, false, true);
-    // открываем порт (115200 по умолчанию)
-    await transport.connect(115200);
-    log('✅ Serial открыт.');
-
-    // ESPLoader: поддерживаем разные сигнатуры конструктора
-    const LoaderClass = window.ESPLoader || (window.esptool && window.esptool.ESPLoader);
-    if (!LoaderClass) throw new Error('ESPLoader не найден в esptool-js.');
-
-    try {
-      // современный вариант: объект опций
-      loader = new LoaderClass({ transport: transport, baudrate: 115200 });
-    } catch (e) {
-      // старый вариант: позиционные аргументы
-      loader = new LoaderClass(transport, 115200);
+    function log(msg) {
+      logEl.textContent += msg + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
     }
 
-    log('Пытаюсь установить связь с чипом (enter bootloader) ...');
-    // Подключение — метод connect
-    if (typeof loader.connect === 'function') {
-      await loader.connect();
-      log('✅ Связь с чипом установлена.');
-      setStatus('Подключено');
-      btnFlash.disabled = false;
-    } else {
-      throw new Error('Метод connect не найден у ESPLoader.');
-    }
-  } catch (e) {
-    console.error(e);
-    log('❌ Ошибка при подключении: ' + (e && e.message ? e.message : e));
-    setStatus('Ошибка подключения');
-    btnFlash.disabled = true;
-  }
-});
-
-/* Helper: Uint8Array -> base64 (chunked, чтобы не упасть на больших файлах) */
-function uint8ToBase64(u8) {
-  const CHUNK = 0x8000;
-  let str = '';
-  for (let i = 0; i < u8.length; i += CHUNK) {
-    const sub = u8.subarray(i, i + CHUNK);
-    str += String.fromCharCode.apply(null, sub);
-  }
-  return btoa(str);
-}
-
-/* ---- 3. Прошить ---- */
-btnFlash.addEventListener('click', async () => {
-  try {
-    if (!loader) throw new Error('Сначала подключитесь к устройству.');
-
-    log('\n=== Начинаю прошивку ===');
-    setStatus('Прошивка...');
-    setProgress(0);
-    // Загружаем все файлы
-    const fileArray = [];
-    let totalBytes = 0;
-    for (const f of FILES) {
-      log(`Загружаю ${f.name}...`);
-      const resp = await fetch(f.name);
-      if (!resp.ok) throw new Error(`Файл ${f.name} не найден на сервере (status ${resp.status})`);
-      const ab = await resp.arrayBuffer();
-      const u8 = new Uint8Array(ab);
-      totalBytes += u8.length;
-      const b64 = uint8ToBase64(u8);
-      fileArray.push({ address: f.address, data: b64 });
-      log(`✅ ${f.name} (${u8.length} байт)`);
-    }
-
-    log('Передаю данные в загрузчик...');
-    // Вызов writeFlash: см. интерфейс FlashOptions
-    await loader.writeFlash({
-      fileArray: fileArray,
-      flashSize: 'keep',
-      // reportProgress может принимать (fileIndex, written, total)
-      reportProgress: (fileIndex, written, total) => {
-        const percent = Math.floor((written / total) * 100);
-        setProgress(percent);
-        setStatus(`Прошивка: ${percent}% (файл ${fileIndex + 1}/${fileArray.length})`);
-        log(`Прогресс: ${percent}% (файл ${fileIndex + 1}/${fileArray.length})`);
-      },
-      compress: false,
-      eraseAll: false
+    selectPortBtn.addEventListener("click", async () => {
+      try {
+        const port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        transport = { 
+          write: data => port.writable.getWriter().write(data),
+          read: async () => {
+            const reader = port.readable.getReader();
+            const { value } = await reader.read();
+            return value;
+          }
+        };
+        loader = new ESPLoader(transport, log);
+        log("✅ Порт выбран, готово к подключению");
+        flashBtn.disabled = false;
+      } catch (e) {
+        log("❌ Ошибка выбора порта: " + e.message);
+      }
     });
 
-    setProgress(100);
-    setStatus('Готово');
-    log('🎉 Прошивка завершена успешно!');
-  } catch (e) {
-    console.error(e);
-    log('❌ Ошибка прошивки: ' + (e && e.message ? e.message : e));
-    setStatus('Ошибка прошивки');
-  } finally {
-    // необязательно: оставляем порт открытым, чтобы пользователь мог смотреть логи.
-  }
-});
-
-/* Инициализация */
-(function init(){
-  log('Страница готова. Нажмите "Выбрать порт".');
-  if (!navigator.serial) {
-    log('⚠️ Web Serial API не доступен в этом браузере. Откройте Chrome или Edge.');
-    setStatus('Браузер не поддерживается');
-    btnSelect.disabled = true;
-    btnConnect.disabled = true;
-    btnFlash.disabled = true;
-  }
-})();
-</script>
+    flashBtn.addEventListener("click", async () => {
+      try {
+        await loader.main();
+        log("✅ Подключено к ESP");
+        // тут потом добавим прошивку .bin файлов
+      } catch (e) {
+        log("❌ Ошибка подключения: " + e.message);
+      }
+    });
+  </script>
 </body>
 </html>
