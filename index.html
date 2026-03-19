@@ -1,274 +1,32 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>YoRadio Web Flasher</title>
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
   <style>
     body {
       font-family: Arial, sans-serif;
-      background: #f5f5f5;
-      color: #333;
+      max-width: 760px;
+      margin: 40px auto;
+      padding: 0 16px;
+      line-height: 1.5;
       text-align: center;
-      padding: 40px;
     }
-    h1 {
-      color: #0077cc;
-    }
-    button {
-      background: #0077cc;
-      color: #fff;
-      padding: 12px 24px;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      cursor: pointer;
-      margin: 10px;
-    }
-    button:hover {
-      background: #005fa3;
-    }
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
-    #progress-container {
-      width: 80%;
-      margin: 20px auto;
-      background: #ddd;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    #progress-bar {
-      height: 24px;
-      width: 0%;
-      background: #4caf50;
-      transition: width 0.3s;
-    }
-    #log {
-      text-align: left;
-      margin: 20px auto;
-      width: 80%;
-      padding: 10px;
-      background: #fff;
+    .box {
       border: 1px solid #ccc;
-      border-radius: 8px;
-      height: 200px;
-      overflow-y: auto;
-      font-family: monospace;
-      font-size: 13px;
-    }
-    .status {
-      margin: 10px;
-      font-weight: bold;
+      border-radius: 12px;
+      padding: 24px;
     }
   </style>
 </head>
 <body>
-  <h1>YoRadio Web Flasher</h1>
-  <p>Подключите ESP32/ESP8266 и выполните действия по порядку:</p>
-  
-  <div>
-    <button id="selectPort">1. Выбрать порт</button>
-    <button id="connect" disabled>2. Подключиться</button>
-    <button id="flash" disabled>3. Прошить</button>
+  <div class="box">
+    <h1>YoRadio Web Flasher</h1>
+    <p>Подключите ESP32-S3 по USB, нажмите кнопку и выберите COM-порт.</p>
+    <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+    <p>Открывать в Chrome или Edge.</p>
   </div>
-
-  <div class="status" id="status">Статус: Выберите порт</div>
-
-  <div id="progress-container">
-    <div id="progress-bar"></div>
-  </div>
-
-  <pre id="log"></pre>
-
-  <!-- Правильная версия библиотеки -->
-  <script src="https://cdn.jsdelivr.net/npm/esptool-js@0.1.4/dist/esptool-js.js"></script>
-  
-  <script>
-    const files = [
-      { offset: 0x0,       name: "bootloader.bin" },
-      { offset: 0x8000,    name: "partitions.bin" },
-      { offset: 0x10000,   name: "firmware.bin" },
-      { offset: 0x3D0000,  name: "spiffs.bin" }
-    ];
-
-    const logEl = document.getElementById("log");
-    const progressBar = document.getElementById("progress-bar");
-    const statusEl = document.getElementById("status");
-    const selectPortBtn = document.getElementById("selectPort");
-    const connectBtn = document.getElementById("connect");
-    const flashBtn = document.getElementById("flash");
-
-    let selectedPort = null;
-    let esptool = null;
-
-    function log(msg) {
-      logEl.textContent += msg + "\n";
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-
-    function setProgress(percent) {
-      progressBar.style.width = percent + "%";
-    }
-
-    function setStatus(msg) {
-      statusEl.textContent = "Статус: " + msg;
-    }
-
-    function updateButtons() {
-      connectBtn.disabled = !selectedPort;
-      flashBtn.disabled = !esptool;
-    }
-
-    // Проверяем поддержку Web Serial API при загрузке
-    window.addEventListener('load', () => {
-      if (!navigator.serial) {
-        log("⚠️ Web Serial API не поддерживается вашим браузером");
-        log("ℹ️ Используйте Chrome, Edge или другой совместимый браузер");
-        selectPortBtn.disabled = true;
-        setStatus("Браузер не поддерживается");
-      } else {
-        log("✅ Web Serial API поддерживается");
-      }
-      
-      // Проверяем загрузку библиотеки
-      setTimeout(() => {
-        if (typeof EspTool === 'undefined') {
-          log("❌ Библиотека EspTool не загрузилась");
-          log("Попробуйте обновить страницу (Ctrl + F5)");
-        } else {
-          log("✅ Библиотека EspTool загружена");
-        }
-      }, 1000);
-    });
-
-    // 1. Выбор порта
-    selectPortBtn.addEventListener("click", async () => {
-      try {
-        log("🔌 Выбор последовательного порта...");
-        
-        if (!navigator.serial) {
-          throw new Error("Web Serial API не поддерживается. Используйте Chrome или Edge.");
-        }
-
-        selectedPort = await navigator.serial.requestPort();
-        const portInfo = selectedPort.getInfo();
-        log("✅ Порт выбран: " + (portInfo.usbProductId || "Unknown"));
-        setStatus("Порт выбран");
-        updateButtons();
-        
-      } catch (e) {
-        if (e.name === 'NotFoundError') {
-          log("❌ Порт не выбран");
-        } else {
-          log("❌ Ошибка выбора порта: " + e.message);
-        }
-        console.error(e);
-      }
-    });
-
-    // 2. Подключение к устройству
-    connectBtn.addEventListener("click", async () => {
-      try {
-        log("🔗 Подключение к устройству...");
-        setStatus("Подключение");
-        
-        if (!selectedPort) {
-          throw new Error("Сначала выберите порт");
-        }
-
-        // Проверяем, что библиотека загружена
-        if (typeof EspTool === 'undefined') {
-          throw new Error("Библиотека EspTool не загружена. Обновите страницу (Ctrl + F5).");
-        }
-
-        // Открываем порт
-        await selectedPort.open({ baudRate: 115200 });
-        
-        // Создаем экземпляр EspTool
-        esptool = new EspTool();
-        await esptool.initialize(selectedPort);
-        
-        log("✅ Успешно подключено к ESP");
-        const chipInfo = await esptool.get_chip_info();
-        log("📋 Информация о чипе: " + JSON.stringify(chipInfo));
-        setStatus("Подключено");
-        updateButtons();
-        
-      } catch (e) {
-        log("❌ Ошибка подключения: " + e.message);
-        setStatus("Ошибка подключения");
-        console.error(e);
-        esptool = null;
-        updateButtons();
-        
-        // Закрываем порт в случае ошибки
-        if (selectedPort) {
-          try {
-            await selectedPort.close();
-          } catch (closeError) {
-            console.error("Ошибка закрытия порта:", closeError);
-          }
-        }
-      }
-    });
-
-    // 3. Прошивка
-    flashBtn.addEventListener("click", async () => {
-      try {
-        logEl.textContent = "";
-        setProgress(0);
-        log("🚀 Начало прошивки...");
-        setStatus("Прошивка");
-
-        if (!esptool) {
-          throw new Error("Сначала подключитесь к устройству");
-        }
-
-        // Загрузка файлов прошивки
-        const fileData = {};
-        for (let i = 0; i < files.length; i++) {
-          const f = files[i];
-          log(`📥 Загрузка ${f.name}...`);
-          try {
-            const resp = await fetch(f.name);
-            if (!resp.ok) throw new Error(`Файл не найден: ${resp.status}`);
-            const data = new Uint8Array(await resp.arrayBuffer());
-            fileData[f.offset] = data;
-            log(`✅ ${f.name} загружен (${data.length} байт)`);
-          } catch (e) {
-            log(`❌ Ошибка загрузки ${f.name}: ${e.message}`);
-            throw e;
-          }
-        }
-
-        // Процесс прошивки
-        log("⚡ Запуск прошивки...");
-        await esptool.writeFlash({
-          fileArray: fileData,
-          flashSize: "keep",
-          onProgress: (bytesWritten, totalBytes) => {
-            const percent = Math.floor((bytesWritten / totalBytes) * 100);
-            setProgress(percent);
-            if (percent % 10 === 0) {
-              log(`Прогресс: ${percent}%`);
-            }
-          }
-        });
-
-        setProgress(100);
-        log("🎉 Прошивка завершена успешно!");
-        log("🔄 Перезагрузка устройства...");
-        await esptool.hardReset();
-        log("✅ Устройство перезагружено");
-        setStatus("Готово");
-        
-      } catch (e) {
-        log("❌ Ошибка прошивки: " + e.message);
-        setStatus("Ошибка прошивки");
-        console.error(e);
-      }
-    });
-  </script>
 </body>
 </html>
